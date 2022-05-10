@@ -1,0 +1,194 @@
+#!/bin/sh
+# imgg - cover images generator
+# Licensed under the The Unlicense.
+# For more information, please refer to <https://unlicense.org>
+
+# This script should not be sourced, make sure to change the string 'imgg'
+#   to match this file's name
+[ 'imgg' = "$( basename ${0} )" ] || return 1
+
+SCRIPT=$( basename "$0" )
+VMAJOR=0
+VMINOR=1
+VPATCH=0
+HOMEPAGE="https://gitlab.com/4bcx/imgg"
+
+print_help () {
+	cat << END_OF_HELP_TEXT
+${SCRIPT} v${VMAJOR}.${VMINOR}.${VPATCH}
+Cover images generator
+
+Usage: ${SCRIPT} [OPTION]
+Generate a cover SVG image based on the hash of a label.
+
+Options:
+  -h, --help                        display this help text and exit
+  -v, --version                     print version and exit
+  -s, --image-size WIDTH[,HEIGHT]   define ouput image width and height
+  -p, --pixel-size WIDTH[,HEIGHT]   define squares width and height
+  -f, --font-size SIZE              define label font size
+  -i, --input-text TEXT             generate image based on TEXT hash
+  -l, --label TEXT                  write TEXT on image
+  -o, --output-file FILE            output to FILE instead of stdout
+
+Defaults:
+  Image width:  320
+  Image height: equal to image width
+  Pixel width:  40
+  Pixel height: equal to image width
+  Font size:    24 (in px)
+  Label:        none
+  Text:         same as label, or random if not defined
+
+Project homepage: <"${HOMEPAGE}">
+END_OF_HELP_TEXT
+}
+
+print_version () {
+	VERSION="${VMAJOR}.${VMINOR}.${VPATCH}"
+	printf '%s Version %s\n' "${SCRIPT}" "${VERSION}"
+}
+
+print_error () {
+	ERROR_MSG=${1:-Unknown error}
+	printf '%s: %s\n' "${SCRIPT}" "${ERROR_MSG}" >&2
+}
+
+check_integer () {
+	case ${1} in
+		''|*[!0-9]*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+script_main () {
+	set -- $( printf '%s' "${HASH}" | sed -e 's/\(..\)/\1 /g' )
+
+	cat << END_OF_OUTPUT_HEADER > "${OUTPUT_FILE}"
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="${IMAGE_WIDTH}" height="${IMAGE_HEIGHT}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <rect id="cell" x="0" y="0" width="${PIXEL_WIDTH}" height="${PIXEL_HEIGHT}" stroke="none" />
+END_OF_OUTPUT_HEADER
+
+	CURRENT_Y=0
+	while [ ${CURRENT_Y} -lt ${IMAGE_HEIGHT} ]; do
+	CURRENT_X=0
+	while [ ${CURRENT_X} -lt ${IMAGE_WIDTH} ]; do
+		printf '<use href="#cell" x="%s" y="%s" fill="#%s%s%s" />\n' \
+			${CURRENT_X} ${CURRENT_Y} ${1} ${2} ${3} >> "${OUTPUT_FILE}"
+		set -- $@ ${2} ${3} ${1}
+		shift 3
+		CURRENT_X=$(( CURRENT_X + PIXEL_WIDTH ))
+	done
+	CURRENT_Y=$(( CURRENT_Y + PIXEL_HEIGHT ))
+	done
+
+	if [ -n "${LABEL}" ]; then
+		cat << END_OF_TEXT_BLOCK >> "${OUTPUT_FILE}"
+  <filter id="blur">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="1" />
+  </filter>
+  <text x="$(( IMAGE_WIDTH / 2 ))" y="$(( IMAGE_HEIGHT / 2 ))" font-size="${FONT_SIZE}px" font-family="monospace" dominant-baseline="middle" text-anchor="middle" fill="#FFF" filter="url(#blur)">${LABEL}</text>
+  <text x="$(( IMAGE_WIDTH / 2 ))" y="$(( IMAGE_HEIGHT / 2 ))" font-size="${FONT_SIZE}px" font-family="monospace" dominant-baseline="middle" text-anchor="middle" fill="#FFF">${LABEL}</text>
+END_OF_TEXT_BLOCK
+	fi
+	printf '</svg>\n' >> "${OUTPUT_FILE}"
+
+	if [ "${STD_OUT}" = 'true' ]; then
+		cat "${OUTPUT_FILE}"
+		rm "${OUTPUT_FILE}"
+	fi
+}
+
+STD_OUT='true'
+IMAGE_WIDTH=320
+IMAGE_HEIGHT=320
+PIXEL_WIDTH=40
+PIXEL_HEIGHT=40
+FONT_SIZE=24
+LABEL=''
+TEXT="${RANDOM}"
+
+while [ $# -gt 0 ]; do
+	case "${1}" in
+		-h|--help)
+			print_help
+			exit 0
+			;;
+		-v|--version)
+			print_version
+			exit 0
+			;;
+		-s|--image-size)
+			IMAGE_WIDTH="${2%,*}"
+			IMAGE_HEIGHT="${2#*,}"
+			shift
+			;;
+		-p|--pixel-size)
+			PIXEL_WIDTH="${2%,*}"
+			PIXEL_HEIGHT="${2#*,}"
+			shift
+			;;
+		-f|--font-size)
+			FONT_SIZE="${2}"
+			shift
+			;;
+		-l|--label )
+			LABEL="${2}"
+			shift
+			;;
+		-i|--input-text)
+			TEXT="${2}"
+			shift
+			;;
+		-o|--output-file)
+			OUTPUT_FILE="${2}"
+			STD_OUT='false'
+			shift
+			;;
+		*)
+			print_error "${1}: Invalid argument"
+			print_help >&2
+			exit 22
+			;;
+	esac
+	shift
+done
+
+if ! check_integer ${IMAGE_WIDTH}; then
+	print_error "${IMAGE_WIDTH}: Image width must be an integer"
+	exit 22
+fi
+if ! check_integer ${IMAGE_HEIGHT}; then
+	print_error "${IMAGE_HEIGHT}: Image height must be an integer"
+	exit 22
+fi
+if ! check_integer ${PIXEL_WIDTH}; then
+	print_error "${PIXEL_WIDTH}: Pixel width must be an integer"
+	exit 22
+fi
+if ! check_integer ${PIXEL_HEIGHT}; then
+	print_error "${PIXEL_HEIGHT}: Pixel height must be an integer"
+	exit 22
+fi
+if ! check_integer ${FONT_SIZE}; then
+	print_error "${FONT_SIZE}: Font size must be an integer"
+	exit 22
+fi
+
+if [ -n "${LABEL}" ]; then
+	TEXT="${LABEL}"
+fi
+
+HASH=$( printf '%s' "${TEXT}" | md5sum | cut -f 1 -d ' ' )
+
+if [ "${STD_OUT}" = 'true' ]; then
+	OUTPUT_FILE=$( mktemp )
+elif [ -f "${OUTPUT_FILE}" ]; then
+	print_error "${OUTPUT_FILE}: File exists and will be overwritten"
+fi
+
+trap "print_error 'Interrupt signal detected, output may be incomplete'" INT
+
+script_main
